@@ -493,3 +493,45 @@ textarea {
 }
 
 
+1)Create a Blog Post
+
+URL: http://localhost:3000/posts
+Method: POST
+Body:
+json
+Copy code
+{
+  "title": "A New Post",
+  "content": "Content of the new post",
+  "category_id": 2
+}
+
+2)Add a Comment to a Post
+
+URL: http://localhost:3000/posts/1/comments
+Method: POST
+Body:
+json
+Copy code
+{
+  "content": "This is a comment."
+}
+
+3)Add a Tag to a Post
+
+URL: http://localhost:3000/posts/1/tags
+Method: POST
+Body:
+json
+Copy code
+{
+  "tag_id": 3
+}
+
+4)Fetch All Posts
+
+URL: http://localhost:3000/posts
+Method: GET
+
+
+
