@@ -1,204 +1,495 @@
+backend:
+blog-app/
+├── config/
+│   └── config.js           # Sequelize database configuration
+├── models/
+│   ├── index.js            # Initializes all models and associations
+│   ├── Post.js             # Post model
+│   ├── Comment.js          # Comment model
+│   ├── Category.js         # Category model
+│   └── Tag.js              # Tag model
+├── routes/
+│   ├── posts.js            # Routes related to posts
+│   └── comments.js         # Routes related to comments
+├── controllers/
+│   ├── postController.js   # Controller for post actions
+│   └── commentController.js # Controller for comment actions
+├── db/
+│   └── db_file_name.sqlite # SQLite database file
+├── migrations/             # Sequelize migrations folder
+├── seeders/                # Sequelize seeders folder
+├── app.js                  # Express application setup
+└── package.json            # Project dependencies and scripts
+
+config.js:
+const { Sequelize } = require('sequelize');
+
+const sequelize = new Sequelize({
+    dialect: 'sqlite',
+    storage: 'db_file_name.sqlite',
+});
+
+module.exports = sequelize;
+
+models/index.js:
+const Sequelize = require('sequelize');
+const sequelize = require('../config/config');
+
+const Post = require('./Post')(sequelize, Sequelize);
+const Comment = require('./Comment')(sequelize, Sequelize);
+const Category = require('./Category')(sequelize, Sequelize);
+const Tag = require('./Tag')(sequelize, Sequelize);
+
+// Define associations
+Category.hasMany(Post, { foreignKey: 'category_id' });
+Post.belongsTo(Category, { foreignKey: 'category_id' });
+
+Post.hasMany(Comment, { foreignKey: 'post_id' });
+Comment.belongsTo(Post, { foreignKey: 'post_id' });
+
+Post.belongsToMany(Tag, { through: 'post_tags', foreignKey: 'post_id' });
+Tag.belongsToMany(Post, { through: 'post_tags', foreignKey: 'tag_id' });
+
+module.exports = { sequelize, Post, Comment, Category, Tag };
+
+models/Post.js:
+module.exports = (sequelize, DataTypes) => {
+    const Post = sequelize.define('Post', {
+        title: { type: DataTypes.STRING, allowNull: false },
+        content: { type: DataTypes.TEXT, allowNull: false },
+    });
+    return Post;
+};
+
+models/Comment.js:
+module.exports = (sequelize, DataTypes) => {
+    const Comment = sequelize.define('Comment', {
+        content: { type: DataTypes.TEXT, allowNull: false },
+    });
+    return Comment;
+};
+
+models/Category.js:
+module.exports = (sequelize, DataTypes) => {
+    const Category = sequelize.define('Category', {
+        name: { type: DataTypes.STRING, allowNull: false, unique: true },
+    });
+    return Category;
+};
+
+ models/Tag.js:
+module.exports = (sequelize, DataTypes) => {
+    const Tag = sequelize.define('Tag', {
+        name: { type: DataTypes.STRING, allowNull: false, unique: true },
+    });
+    return Tag;
+};
+
+controllers/postController.js:
+const { Post, Category, Tag, Comment } = require('../models');
+
+// Create a blog post
+exports.createPost = async (req, res) => {
+    try {
+        const { title, content, category_id } = req.body;
+        const post = await Post.create({ title, content, category_id });
+        res.status(201).json({ message: 'Post created', postId: post.id });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+};
+
+// Fetch all posts with category info
+exports.getAllPosts = async (req, res) => {
+    try {
+        const posts = await Post.findAll({ include: Category });
+        res.json(posts);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+};
+
+controllers/commentController.js:
+const { Comment } = require('../models');
+
+// Add a comment to a post
+exports.addComment = async (req, res) => {
+    try {
+        const { postId } = req.params;
+        const { content } = req.body;
+        const comment = await Comment.create({ post_id: postId, content });
+        res.status(201).json({ message: 'Comment added', commentId: comment.id });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+};
+
+routes/posts.js:
 const express = require('express');
-const mysql = require('mysql2');
+const router = express.Router();
+const postController = require('../controllers/postController');
+
+router.post('/', postController.createPost);
+router.get('/', postController.getAllPosts);
+
+module.exports = router;
+
+routes/comments.js:
+const express = require('express');
+const router = express.Router();
+const commentController = require('../controllers/commentController');
+
+router.post('/:postId/comments', commentController.addComment);
+
+module.exports = router;
+
+
+app.js:
+const express = require('express');
 const bodyParser = require('body-parser');
+const { sequelize } = require('./models');
 
 const app = express();
 const port = 3000;
 
 app.use(bodyParser.json());
 
-// MySQL connection setup
-const pool = mysql.createPool({
-    host: 'localhost',
-    user: 'root',       // replace with your MySQL username
-    password: 'arjun', // replace with your MySQL password
-    database: 'blog',    // replace with your database name
-    waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0
-});
+const postRoutes = require('./routes/posts');
+const commentRoutes = require('./routes/comments');
 
-// Create a blog post
-app.post('/posts', (req, res) => {
-    const { title, content, category_id } = req.body;
-    const sql = 'INSERT INTO posts (title, content, category_id) VALUES (?, ?, ?)';
-    pool.query(sql, [title, content, category_id], (err, result) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.status(201).json({ message: 'Post created', postId: result.insertId });
+app.use('/posts', postRoutes);
+app.use('/posts', commentRoutes);
+
+// Synchronize database and start server
+sequelize.sync().then(() => {
+    app.listen(port, () => {
+        console.log(`Server is running on http://localhost:${port}`);
     });
 });
 
-// Add a comment to a post
-app.post('/posts/:postId/comments', (req, res) => {
-    const { postId } = req.params;
-    const { content } = req.body;
-    const sql = 'INSERT INTO comments (post_id, content) VALUES (?, ?)';
-    pool.query(sql, [postId, content], (err, result) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.status(201).json({ message: 'Comment added', commentId: result.insertId });
-    });
+
+Frontend:
+blog-frontend/
+├── public/
+│   └── index.html           # Main HTML file
+├── src/
+│   ├── components/
+│   │   ├── PostList.js      # Displays list of all posts
+│   │   ├── PostDetail.js    # Displays a single post with comments and add comment form
+│   │   ├── AddPost.js       # Form to create a new post
+│   ├── services/
+│   │   └── api.js           # Axios setup for API calls
+│   ├── App.js               # Main App component with routes
+│   ├── index.js             # Main entry file
+└── package.json             # Project dependencies
+under src create index.css(for styling part)
+
+src/services/api.js:
+
+import axios from 'axios';
+
+const api = axios.create({
+    baseURL: 'http://localhost:3000', // Your backend API URL
 });
 
-// Add a tag to a post
-app.post('/posts/:postId/tags', (req, res) => {
-    const { postId } = req.params;
-    const { tag_id } = req.body;
-    const sql = 'INSERT INTO post_tags (post_id, tag_id) VALUES (?, ?)';
-    pool.query(sql, [postId, tag_id], (err, result) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.status(201).json({ message: 'Tag added to post' });
-    });
-});
+export const fetchPosts = () => api.get('/posts');
+export const createPost = (postData) => api.post('/posts', postData);
+export const fetchComments = (postId) => api.get(`/posts/${postId}/comments`);
+export const addComment = (postId, commentData) => api.post(`/posts/${postId}/comments`, commentData);
 
-// Fetch all posts
-app.get('/posts', (req, res) => {
-    const sql = `
-        SELECT p.id, p.title, p.content, c.name AS category
-        FROM posts p
-        LEFT JOIN categories c ON p.category_id = c.id
-    `;
-    pool.query(sql, (err, result) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(result);
-    });
-});
+export default api;
 
-// Fetch comments for a specific post
-app.get('/posts/:postId/comments', (req, res) => {
-    const { postId } = req.params;
-    const sql = 'SELECT * FROM comments WHERE post_id = ?';
-    pool.query(sql, [postId], (err, result) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(result);
-    });
-});
+src/App.js:
+// src/App.js
+import React from 'react';
+import { BrowserRouter as Router, Route, Routes } from 'react-router-dom';
+import PostList from './components/PostList';
+import PostDetail from './components/PostDetail';
+import AddPost from './components/AddPost';
 
-// Fetch tags for a specific post
-app.get('/posts/:postId/tags', (req, res) => {
-    const { postId } = req.params;
-    const sql = `
-        SELECT t.id, t.name
-        FROM tags t
-        JOIN post_tags pt ON t.id = pt.tag_id
-        WHERE pt.post_id = ?
-    `;
-    pool.query(sql, [postId], (err, result) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(result);
-    });
-});
-
-// Start server
-app.listen(port, () => {
-    console.log(`Server is running on http://localhost:${port}`);
-});
-
-
-
-/**
- -- Create `blog` database
-CREATE DATABASE IF NOT EXISTS blog;
-USE blog;
-
--- Create `posts` table
-CREATE TABLE posts (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    title VARCHAR(255) NOT NULL,
-    content TEXT NOT NULL,
-    category_id INT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL
-);
-
--- Create `comments` table
-CREATE TABLE comments (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    post_id INT NOT NULL,
-    content TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
-);
-
--- Create `categories` table
-CREATE TABLE categories (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(255) NOT NULL UNIQUE
-);
-
--- Create `tags` table
-CREATE TABLE tags (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(255) NOT NULL UNIQUE
-);
-
--- Create `post_tags` table to link posts and tags (many-to-many relationship)
-CREATE TABLE post_tags (
-    post_id INT NOT NULL,
-    tag_id INT NOT NULL,
-    PRIMARY KEY (post_id, tag_id),
-    FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE,
-    FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
-);
-
--- Insert sample categories
-INSERT INTO categories (name) VALUES ('Technology'), ('Lifestyle'), ('Education');
-
--- Insert sample tags
-INSERT INTO tags (name) VALUES ('JavaScript'), ('Node.js'), ('MySQL'), ('Express.js');
-
--- Insert a sample post
-INSERT INTO posts (title, content, category_id) VALUES 
-('My First Blog Post', 'This is the content of the first post.', 1);
-
--- Insert sample comments for the post
-INSERT INTO comments (post_id, content) VALUES 
-(1, 'Great post!'), 
-(1, 'Very informative, thanks!');
-
--- Link tags to the sample post
-INSERT INTO post_tags (post_id, tag_id) VALUES 
-(1, 1), 
-(1, 2);
-
- */
-
-
-1)Create a Blog Post
-
-URL: http://localhost:3000/posts
-Method: POST
-Body:
-json
-Copy code
-{
-  "title": "A New Post",
-  "content": "Content of the new post",
-  "category_id": 2
+function App() {
+    return (
+        <Router>
+            <div className="App">
+                <Routes>
+                    <Route path="/" element={<PostList />} />
+                    <Route path="/posts/:postId" element={<PostDetail />} />
+                    <Route path="/add-post" element={<AddPost />} />
+                </Routes>
+            </div>
+        </Router>
+    );
 }
 
-2)Add a Comment to a Post
+export default App;
 
-URL: http://localhost:3000/posts/1/comments
-Method: POST
-Body:
-json
-Copy code
-{
-  "content": "This is a comment."
+
+src/components/PostList.js:
+// src/components/PostList.js
+import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { fetchPosts } from '../services/api';
+
+function PostList() {
+    const [posts, setPosts] = useState([]);
+
+    useEffect(() => {
+        fetchPosts().then((response) => setPosts(response.data)).catch((error) => console.error(error));
+    }, []);
+
+    return (
+        <div className="container">
+            <h1>Blog Posts</h1>
+            <Link to="/add-post">
+                <button>Add New Post</button>
+            </Link>
+            <ul className="post-list">
+                {posts.map((post) => (
+                    <li key={post.id}>
+                        <Link to={`/posts/${post.id}`}>{post.title}</Link>
+                    </li>
+                ))}
+            </ul>
+        </div>
+    );
 }
 
-3)Add a Tag to a Post
+export default PostList;
 
-URL: http://localhost:3000/posts/1/tags
-Method: POST
-Body:
-json
-Copy code
-{
-  "tag_id": 3
+
+src/components/AddPost.js:
+// src/components/AddPost.js
+import React, { useState } from 'react';
+import { createPost } from '../services/api';
+import { useNavigate } from 'react-router-dom';
+
+function AddPost() {
+    const [title, setTitle] = useState('');
+    const [content, setContent] = useState('');
+    const [category_id, setCategoryId] = useState('');
+    const navigate = useNavigate();
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        try {
+            await createPost({ title, content, category_id });
+            navigate('/');
+        } catch (error) {
+            console.error(error);
+        }
+    };
+
+    return (
+        <div className="container">
+            <h2>Add New Post</h2>
+            <form onSubmit={handleSubmit}>
+                <div>
+                    <label>Title</label>
+                    <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} required />
+                </div>
+                <div>
+                    <label>Content</label>
+                    <textarea value={content} onChange={(e) => setContent(e.target.value)} required />
+                </div>
+                <div>
+                    <label>Category ID</label>
+                    <input type="text" value={category_id} onChange={(e) => setCategoryId(e.target.value)} />
+                </div>
+                <button type="submit">Add Post</button>
+            </form>
+        </div>
+    );
 }
 
-4)Fetch All Posts
+export default AddPost;
 
-URL: http://localhost:3000/posts
-Method: GET
+
+src/components/PostDetail.js:
+// src/components/PostDetail.js
+import React, { useEffect, useState } from 'react';
+import { useParams } from 'react-router-dom';
+import { fetchComments, addComment } from '../services/api';
+
+function PostDetail() {
+    const { postId } = useParams();
+    const [post, setPost] = useState({});
+    const [comments, setComments] = useState([]);
+    const [commentContent, setCommentContent] = useState('');
+
+    useEffect(() => {
+        // Fetch post details (placeholder here)
+        // Fetch comments
+        fetchComments(postId).then((response) => setComments(response.data)).catch((error) => console.error(error));
+    }, [postId]);
+
+    const handleAddComment = async (e) => {
+        e.preventDefault();
+        try {
+            await addComment(postId, { content: commentContent });
+            setCommentContent('');
+            fetchComments(postId).then((response) => setComments(response.data));
+        } catch (error) {
+            console.error(error);
+        }
+    };
+
+    return (
+        <div className="container">
+            <h2>{post.title}</h2>
+            <p>{post.content}</p>
+            <div className="comments">
+                <h3>Comments</h3>
+                <ul>
+                    {comments.map((comment) => (
+                        <li key={comment.id} className="comment-item">{comment.content}</li>
+                    ))}
+                </ul>
+                <form onSubmit={handleAddComment}>
+                    <textarea
+                        value={commentContent}
+                        onChange={(e) => setCommentContent(e.target.value)}
+                        required
+                    />
+                    <button type="submit">Add Comment</button>
+                </form>
+            </div>
+        </div>
+    );
+}
+
+export default PostDetail;
+src/index.js:
+// src/index.js
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App';
+import './index.css';
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+
+
+public/index.html:
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Blog Frontend</title>
+</head>
+<body>
+    <div id="root"></div>
+</body>
+</html>
+
+
+
+src/index.css"
+
+/* src/index.css */
+
+/* Basic Reset */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+/* General Styling */
+body {
+    font-family: Arial, sans-serif;
+    background-color: #f9f9f9;
+    color: #333;
+    line-height: 1.6;
+}
+
+.container {
+    max-width: 800px;
+    margin: 20px auto;
+    padding: 20px;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* Header */
+h1, h2, h3 {
+    color: #333;
+    margin-bottom: 1rem;
+}
+
+/* Post List Styling */
+ul.post-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+ul.post-list li {
+    margin-bottom: 1rem;
+    padding: 1rem;
+    border-bottom: 1px solid #ddd;
+}
+
+ul.post-list li a {
+    color: #333;
+    text-decoration: none;
+    font-size: 1.2rem;
+    font-weight: bold;
+}
+
+ul.post-list li a:hover {
+    color: #0073e6;
+}
+
+/* Buttons */
+button {
+    background-color: #0073e6;
+    color: #fff;
+    border: none;
+    padding: 10px 15px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 1rem;
+    margin-top: 10px;
+}
+
+button:hover {
+    background-color: #005bb5;
+}
+
+/* Forms */
+form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+input[type="text"],
+textarea {
+    padding: 10px;
+    font-size: 1rem;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+}
+
+textarea {
+    resize: vertical;
+    min-height: 80px;
+}
+
+/* Comments */
+.comments {
+    margin-top: 2rem;
+}
+
+.comments h3 {
+    margin-bottom: 1rem;
+}
+
+.comment-item {
+    padding: 1rem;
+    border-bottom: 1px solid #ddd;
+}
+
+
